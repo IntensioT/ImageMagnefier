@@ -1,3 +1,14 @@
+﻿#include <Windows.h>
+
+#ifdef max
+#undef max
+#endif
+
+#ifdef min
+#undef min
+#endif
+
+
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
@@ -18,8 +29,79 @@ float offsetY = 0.0f;
 const float zoomStep = 0.1f;
 const float moveStep = 0.05f;
 
+float megnefierSpeed = 10.f;
+
 
 int offsetx, offsety, width, height;
+
+void receiveDataFromUSART() {
+    HANDLE hSerial = CreateFileA("COM8", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+    if (hSerial == INVALID_HANDLE_VALUE) {
+        std::cerr << "Error opening COM port" << std::endl;
+        return;
+    }
+
+    DCB dcbSerialParams = { 0 };
+    dcbSerialParams.DCBlength = sizeof(dcbSerialParams);
+    if (!GetCommState(hSerial, &dcbSerialParams)) {
+        std::cerr << "Error getting COM port state" << std::endl;
+        CloseHandle(hSerial);
+        return;
+    }
+    dcbSerialParams.BaudRate = CBR_9600; 
+    dcbSerialParams.ByteSize = 8;          
+    dcbSerialParams.StopBits = ONESTOPBIT;
+    dcbSerialParams.Parity = NOPARITY;    
+    if (!SetCommState(hSerial, &dcbSerialParams)) {
+        std::cerr << "Error setting COM port state" << std::endl;
+        CloseHandle(hSerial);
+        return;
+    }
+
+    int8_t buffer[1];
+    DWORD bytesRead;
+    if (ReadFile(hSerial, buffer, sizeof(buffer), &bytesRead, NULL)) {
+        // Обработка данных в buffer[0]
+        std::cout << "Received byte: " << static_cast<int>(buffer[0]) << std::endl;
+        int8_t byteValue = buffer[0];
+        bool decreaseScale = byteValue & (1 << 0);  // 0-й бит - уменьшить масштаб
+        bool increaseScale = byteValue & (1 << 1);  // 1-й бит - увеличить масштаб
+        bool decreaseX = byteValue & (1 << 2);      // 2-й бит - уменьшаем по x
+        bool increaseX = byteValue & (1 << 3);      // 3-й бит - увеличиваем по x
+        bool decreaseY = byteValue & (1 << 4);      // 4-й бит - уменьшаем по y
+        bool increaseY = byteValue & (1 << 5);      // 5-й бит - увеличиваем по y
+
+        if (decreaseScale) {
+            zoom = std::min(zoom - zoomStep, 10.0f);
+        }
+
+        if (increaseScale) {
+            zoom = std::min(zoom + zoomStep, 10.0f);
+        }
+
+        if (decreaseX) {
+            offsetY += moveStep / zoom;
+        }
+
+        if (increaseX) {
+            offsetY -= moveStep / zoom;
+        }
+
+        if (decreaseY) {
+            offsetX -= moveStep / zoom;
+        }
+
+        if (increaseY) {
+            offsetX += moveStep / zoom;
+        }
+    }
+    else {
+        std::cerr << "Error reading from COM port" << std::endl;
+    }
+
+    CloseHandle(hSerial);
+}
+
 
 int main(int argc, char **argv) {
     /*if(argc != 2) {
@@ -54,6 +136,8 @@ int main(int argc, char **argv) {
     }
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_resize);
+    glfwSwapInterval(1);
+
     if(gladLoadGL() == GLFW_FALSE) {
         std::cerr << "failed to init glad" << std::endl;
         glfwTerminate();
@@ -66,6 +150,8 @@ int main(int argc, char **argv) {
     unsigned int texture = loadTexture(data, channels);
 
     while(!glfwWindowShouldClose(window)) {
+        receiveDataFromUSART();
+
         processInput(window);
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -81,7 +167,7 @@ int main(int argc, char **argv) {
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
         glfwSwapBuffers(window);
-        glfwWaitEvents();
+        //glfwWaitEvents();
         glfwPollEvents();
     }
     glfwTerminate();
@@ -175,7 +261,7 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
         offsetX += moveStep / zoom;
     }
-    if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) { // Key '+'
+    if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) { // Key '+'z
         zoom = std::min(zoom + zoomStep, 10.0f); 
     }
     if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) { // Key '-'
@@ -188,8 +274,8 @@ unsigned int loadTexture(unsigned char *data, int channels) {
     unsigned int texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
